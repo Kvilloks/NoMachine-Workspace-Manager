@@ -179,12 +179,17 @@ class FolderBlock:
         if not os.path.isdir(self.folder):
             return
         nxs_files = [os.path.join(self.folder, f) for f in os.listdir(self.folder) if f.lower().endswith('.nxs')]
+        titles = self.get_nxs_titles()
+        # Получим уже открытые окна NoMachine по этим тайтлам
+        opened_titles = [session_title for _, session_title, _ in self.get_nomachine_windows_by_titles(titles)]
         for nxs in nxs_files:
-            try:
-                os.startfile(nxs)
-            except Exception:
-                pass
-            time.sleep(0.5)
+            session_title = os.path.splitext(os.path.basename(nxs))[0]
+            if session_title not in opened_titles:
+                try:
+                    os.startfile(nxs)
+                except Exception:
+                    pass
+                time.sleep(0.5)
 
     def close_nomachine_windows(self):
         titles = self.get_nxs_titles()
