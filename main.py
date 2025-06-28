@@ -5,6 +5,7 @@ import subprocess
 import time
 import psutil
 import win32gui
+import win32con
 import win32process
 import winreg
 import json
@@ -87,6 +88,9 @@ class FolderBlock:
         btn_close_windows = tk.Button(self.frame, text="Close windows", width=17, fg="red",
                                       command=self.close_nomachine_windows)
         btn_close_windows.pack(pady=2)
+        btn_toggle = tk.Button(self.frame, text="Minimize/Restore", width=17,
+                               command=self.toggle_windows)
+        btn_toggle.pack(pady=2)
         btn_remove = tk.Button(self.frame, text="✖", width=3, fg="red",
                                command=self.remove_block)
         btn_remove.place(relx=1.0, rely=0.0, anchor="ne", x=-2, y=2)
@@ -146,17 +150,13 @@ class FolderBlock:
                 'desktop_num': desktop_num
             }
         save_positions_to_registry(self.folder_name, positions)
-        msg = "Positions (and desktop number) saved in Windows Registry" if HAS_PYVDA else "Positions saved (desktop number not saved, pyvda not installed)"
-        messagebox.showinfo("Saved", msg)
 
     def restore_positions(self):
         positions = load_positions_from_registry(self.folder_name)
         if not positions:
-            messagebox.showerror("Error", f"No saved positions in registry for {self.folder_name}")
             return
         titles = self.get_nxs_titles()
         hwnds = self.get_nomachine_windows_by_titles(titles)
-        found = 0
         for hwnd, session_title, _ in hwnds:
             pos = positions.get(session_title)
             if pos:
@@ -174,41 +174,59 @@ class FolderBlock:
                     pos['bottom'] - pos['top'],
                     True
                 )
-                found += 1
-        if found == 0:
-            messagebox.showwarning("Not found", "No matching NoMachine windows found to restore")
-        else:
-            message = f"Restored {found} window positions"
-            if HAS_PYVDA:
-                message += " (including moving to saved desktop)"
-            else:
-                message += " (without restoring desktop, pyvda not installed)"
-            messagebox.showinfo("Restored", message)
 
     def open_all(self):
         if not os.path.isdir(self.folder):
-            messagebox.showerror("Error", f"Folder not found: {self.folder}")
             return
         nxs_files = [os.path.join(self.folder, f) for f in os.listdir(self.folder) if f.lower().endswith('.nxs')]
         for nxs in nxs_files:
             try:
                 os.startfile(nxs)
-            except Exception as e:
-                messagebox.showerror("Error", f"Cannot open {nxs}:\n{e}")
+            except Exception:
+                pass
             time.sleep(0.5)
-        messagebox.showinfo("Opened", f"All NoMachine windows from folder '{self.folder}' have been opened.")
 
     def close_nomachine_windows(self):
         titles = self.get_nxs_titles()
         hwnds = self.get_nomachine_windows_by_titles(titles)
-        closed = 0
         for hwnd, session_title, title in hwnds:
             try:
                 win32gui.PostMessage(hwnd, 0x0010, 0, 0)  # WM_CLOSE
-                closed += 1
             except Exception:
                 pass
-        messagebox.showinfo("Closed", f"Closed {closed} NoMachine windows for folder '{self.folder}'.")
+
+    def is_minimized(self, hwnd):
+        return win32gui.IsIconic(hwnd)
+
+    def toggle_windows(self):
+        titles = self.get_nxs_titles()
+        hwnds = self.get_nomachine_windows_by_titles(titles)
+        if not hwnds:
+            return
+        minimized = [hwnd for hwnd, _, _ in hwnds if self.is_minimized(hwnd)]
+        not_minimized = [hwnd for hwnd, _, _ in hwnds if not self.is_minimized(hwnd)]
+
+        if len(minimized) == len(hwnds):
+            # Все свернуты — развернуть все
+            for hwnd, _, _ in hwnds:
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                except Exception:
+                    pass
+        elif len(not_minimized) == len(hwnds):
+            # Все развернуты — свернуть все
+            for hwnd, _, _ in hwnds:
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                except Exception:
+                    pass
+        else:
+            # Часть свернута, часть нет — развернуть только свернутые
+            for hwnd in minimized:
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                except Exception:
+                    pass
 
     def remove_block(self):
         if messagebox.askyesno("Remove block", f"Remove block '{self.folder_name}'?\n(The folder and files will not be deleted)"):
@@ -258,7 +276,6 @@ class App:
         if not folder_name:
             return
         if folder_name in self.blocks:
-            messagebox.showerror("Exists", f"Block for '{folder_name}' already exists!")
             return
         self.add_folder_block(folder_name)
         self.save_folders()
